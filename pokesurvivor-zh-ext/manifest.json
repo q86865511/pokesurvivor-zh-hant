@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "PokeSurvivor 繁體中文補丁（自製載入器）",
+  "version": "1.1.0",
+  "description": "將 Greasy Fork 腳本 599869（MIT）直接以 content script 注入，不需竄改猴。",
+  "content_scripts": [
+    {
+      "matches": ["https://pokesurvivor.com/*", "https://www.pokesurvivor.com/*"],
+      "js": ["patch.js"],
+      "run_at": "document_idle",
+      "world": "MAIN",
+      "all_frames": false
+    }
+  ]
+}

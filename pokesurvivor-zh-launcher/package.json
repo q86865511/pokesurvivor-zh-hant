@@ -1,0 +1,16 @@
+{
+  "name": "pokesurvivor-zh-launcher",
+  "version": "1.0.0",
+  "description": "PokéSurvivor 繁體中文啟動器：載入原站並注入 Greasy Fork 腳本 599869",
+  "main": "main.js",
+  "private": true,
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-packager . PokeSurvivor-zh --platform=win32 --arch=x64 --out=dist --overwrite --ignore=^/dist"
+  },
+  "devDependencies": {
+    "@electron/packager": "^18.3.6",
+    "electron": "^33.4.11"
+  }
+}
