@@ -1,16 +1,18 @@
 // ==UserScript==
 // @name         PokéSurvivor 繁體中文補丁
 // @namespace    local.pokesurvivor.zh-hant
-// @version      1.1.0
+// @version      1.3.3
 // @license      MIT
 // @homepageURL  https://greasyfork.org/zh-TW/scripts/599869
 // @description  原站遊戲的繁體中文顯示補丁；保留原站更新、帳號和存檔。非官方作品。
 // @match        https://pokesurvivor.com/*
 // @match        https://www.pokesurvivor.com/*
-// @run-at       document-idle
+// @match        https://pokesurvivor.org/*
+// @match        https://www.pokesurvivor.org/*
+// @run-at       document-end
+// @inject-into  auto
 // @sandbox      raw
 // @grant        none
-// @noframes
 // @downloadURL https://update.greasyfork.org/scripts/599869/Pok%C3%A9Survivor%20%E7%B9%81%E9%AB%94%E4%B8%AD%E6%96%87%E8%A3%9C%E4%B8%81.user.js
 // @updateURL https://update.greasyfork.org/scripts/599869/Pok%C3%A9Survivor%20%E7%B9%81%E9%AB%94%E4%B8%AD%E6%96%87%E8%A3%9C%E4%B8%81.meta.js
 // ==/UserScript==
@@ -44,12 +46,68 @@
  */
 (() => {
   'use strict';
-  if (!['pokesurvivor.com', 'www.pokesurvivor.com'].includes(location.hostname)) return;
-  if (!/^\/(?:index\.html|en\/(?:index\.html)?)?$/.test(location.pathname)) return;
+  const gameHost = ['pokesurvivor.com', 'www.pokesurvivor.com'].includes(location.hostname);
+  const guideHost = ['pokesurvivor.org', 'www.pokesurvivor.org'].includes(location.hostname);
+  if (!(gameHost && /^\/(?:index\.html|en\/(?:index\.html)?)?$/.test(location.pathname)) &&
+      !(guideHost && /^\/(?:index\.html|play(?:\/(?:index\.html)?)?)?$/.test(location.pathname))) return;
   const marker = Symbol.for('pokesurvivor.zhHant.displayPatch');
   if (window[marker]) return;
   window[marker] = true;
-  const VERSION = '1.1.0';
+  const VERSION = '1.3.3';
+  // Only exchange patch status with the known parent/child, never game data.
+  const guideOrigins = ['https://pokesurvivor.org', 'https://www.pokesurvivor.org'];
+  const gameOrigins = ['https://pokesurvivor.com', 'https://www.pokesurvivor.com'];
+  const frameStates = new WeakMap();
+  function gameFrameOrigin(frame) {
+    try {
+      const url = new URL(frame.getAttribute('src'), location.href);
+      return gameOrigins.includes(url.origin) && /^\/(?:index\.html|en\/(?:index\.html)?)?$/.test(url.pathname) ? url.origin : null;
+    } catch { return null; }
+  }
+  function announceReady(origin) {
+    window.parent.postMessage({type:'pszh:ready', version:VERSION}, origin);
+  }
+  window.addEventListener('message', event => {
+    if (gameHost && window.parent !== window && event.source === window.parent &&
+        guideOrigins.includes(event.origin) && event.data?.type === 'pszh:check') announceReady(event.origin);
+    if (!guideHost || event.data?.type !== 'pszh:ready' || event.data.version !== VERSION) return;
+    for (const frame of document.querySelectorAll('iframe[src]')) {
+      if (event.source !== frame.contentWindow || event.origin !== gameFrameOrigin(frame)) continue;
+      const state = frameStates.get(frame);
+      if (!state) continue;
+      state.ready = true;
+      clearTimeout(state.timer);
+      state.notice?.remove();
+      frame.dataset.pszhFrame = VERSION;
+    }
+  });
+  function checkGameFrames() {
+    if (!guideHost) return;
+    for (const frame of document.querySelectorAll('iframe[src]')) {
+      const origin = gameFrameOrigin(frame);
+      if (!origin || frameStates.has(frame)) continue;
+      const state = {ready:false, timer:null, notice:null};
+      frameStates.set(frame, state);
+      const ping = () => frame.contentWindow?.postMessage({type:'pszh:check'}, origin);
+      const check = () => {
+        if (state.ready || !frame.isConnected) return;
+        ping();
+        if (!state.notice) {
+          const box = document.createElement('aside');
+          box.id = 'pszh-frame-help'; box.dataset.pszhControl = '';
+          box.setAttribute('role', 'status');
+          box.style.cssText = 'position:fixed;bottom:12px;left:12px;right:12px;z-index:2147483647;padding:12px;border-radius:10px;background:#17243e;color:#fff;font:14px/1.6 system-ui;box-shadow:0 2px 12px #0008';
+          box.append(document.createTextNode('內嵌遊戲尚未回報中文補丁已啟用。請確認手機已更新至 v' + VERSION + '，並允許腳本工具在 .org 與 .com 執行，再重新整理。'));
+          const close = document.createElement('button'); close.textContent = '關閉提示';
+          close.style.cssText = 'margin-left:12px;padding:4px 8px;color:#17243e;background:#fff;border:0;border-radius:4px';
+          close.onclick = () => box.remove(); box.append(close);
+          document.body.append(box); state.notice = box;
+        }
+      };
+      frame.addEventListener('load', () => { state.ready = false; delete frame.dataset.pszhFrame; clearTimeout(state.timer); ping(); state.timer = setTimeout(check, 8000); });
+      ping(); state.timer = setTimeout(check, 8000);
+    }
+  }
   const DICT = {
   "Acero": "鋼",
   "Agua": "水",
@@ -368,11 +426,11 @@
   "Lluvia": "下雨",
   "Sol abrasador": "烈日",
   "Nevada": "降雪",
-  "el Agua se potencia y el Fuego se debilita": "水屬性增強，火屬性減弱",
-  "el Fuego se potencia y el Agua se debilita": "火屬性增強，水屬性減弱",
-  "Roca, Tierra y Acero se potencian; el resto sufre": "岩石、地面與鋼屬性增強，其他屬性受到傷害",
-  "el Hielo se potencia; el resto sufre y va más lento": "冰屬性增強，其他屬性受到傷害並減速",
-  "Fantasma, Hada y Psíquico se potencian": "幽靈、妖精與超能力屬性增強",
+  "el Agua se potencia y el Fuego se debilita": "水系增強，火系減弱",
+  "el Fuego se potencia y el Agua se debilita": "火系增強，水系減弱",
+  "Roca, Tierra y Acero se potencian; el resto sufre": "岩石、地面與鋼系增強，其他系受到傷害",
+  "el Hielo se potencia; el resto sufre y va más lento": "冰系增強，其他系受到傷害並減速",
+  "Fantasma, Hada y Psíquico se potencian": "幽靈、妖精與超能力系增強",
   "Pradera Eterna": "永恆草原",
   "Volcán Ígneo": "熾焰火山",
   "Gruta Marina": "海濱洞窟",
@@ -398,13 +456,13 @@
   "Grieta ·": "裂隙 ·",
   "GRIETA ·": "裂隙 ·",
   "¡{x} salvaje apareció!": "野生的 {x} 出現了！",
-  "¡{x} shiny salvaje apareció!": "野生的異色 {x} 出現了！",
-  "¡Un {x} shiny anda cerca!": "附近有異色 {x}！",
+  "¡{x} shiny salvaje apareció!": "野生的閃光 {x} 出現了！",
+  "¡Un {x} shiny anda cerca!": "附近有閃光 {x}！",
   "¡Marea de Pokémon!": "寶可夢大潮來襲！",
-  "¡Has conseguido a {x} shiny!": "獲得了異色 {x}！",
-  "¡Otro {x} shiny! (+300 monedas)": "又一隻異色 {x}！（+300 金幣）",
+  "¡Has conseguido a {x} shiny!": "獲得了閃光 {x}！",
+  "¡Otro {x} shiny! (+300 monedas)": "又一隻閃光 {x}！（+300 金幣）",
   "¡{x} te esperaba en la grieta!": "{x} 正在裂隙中等著你！",
-  "¡{x} shiny te esperaba en la grieta!": "異色 {x} 正在裂隙中等著你！",
+  "¡{x} shiny te esperaba en la grieta!": "閃光 {x} 正在裂隙中等著你！",
   "¡Has vencido a {x}! Recoge el premio…": "你擊敗了 {x}！去領取獎勵吧…",
   "Criptomonedas": "加密貨幣",
   "PokéSurvivor no tiene ninguna criptomoneda, token ni NFT oficial, y su autor no ha creado ninguno. Cualquier token que use el nombre del juego lo han creado terceros: no nos hacemos cargo de ninguna compra, venta o inversión que hagas con ellos, y nada de lo que hay aquí es una recomendación de inversión.": "PokéSurvivor 沒有任何官方加密貨幣、代幣或 NFT，作者也未發行過。使用遊戲名稱的代幣皆由第三方建立；我們不對任何相關買賣或投資負責，此處內容也不構成投資建議。",
@@ -459,7 +517,7 @@
   "Movimientos": "招式",
   "¡Nuevo récord de tiempo!": "生存時間新紀錄！",
   "· ¡nuevo!": "· 新紀錄！",
-  "{x} Shinies conseguidos": "捕獲 {x} 隻異色寶可夢",
+  "{x} Shinies conseguidos": "捕獲 {x} 隻閃光寶可夢",
   "Tickets del gacha": "扭蛋抽獎券",
   "Nivel máximo": "最高等級",
   "Mundo Misterioso": "不可思議的迷宮",
@@ -571,7 +629,7 @@
   "Tu colección": "你的收藏",
   "Mejoras": "強化",
   "Haz más fuerte cada run": "讓每一局都更強",
-  "9 regiones · Pokémon y shinies": "9 個地區 · 寶可夢與異色寶可夢",
+  "9 regiones · Pokémon y shinies": "9 個地區 · 寶可夢與閃光寶可夢",
   "Misiones": "任務",
   "Misiones, logros y perfil": "任務、成就與個人檔案",
   "Amigos": "好友",
@@ -614,13 +672,13 @@
   "Empieza con": "初始招式",
   "Es tu compañero": "這是你的夥伴",
   "Elegir de compañero{x}": "選為夥伴{x}",
-  "(shiny)": "（異色）",
+  "(shiny)": "（閃光）",
   "Aún no lo tienes.": "你尚未擁有這隻寶可夢。",
   "Consíguelo en el banner de": "可從此地區的卡池獲得：",
-  "o derrotándolo cuando salga shiny.": "或在野外遇見其異色版本並擊敗牠。",
+  "o derrotándolo cuando salga shiny.": "或在野外遇見其閃光版本並擊敗牠。",
   "{x} es ahora tu compañero": "{x} 成為你的夥伴了",
-  "{x} shiny es ahora tu compañero": "異色 {x} 成為你的夥伴了",
-  "· {x} shiny": "· {x} 異色",
+  "{x} shiny es ahora tu compañero": "閃光 {x} 成為你的夥伴了",
+  "· {x} shiny": "· {x} 閃光",
   "{x} · {x}: nivel {x}": "{x} · {x}：等級 {x}",
   "Gacha": "扭蛋",
   "Misterioso": "神祕",
@@ -632,7 +690,7 @@
   "Tiradas sin legendaria en {x}: {x} / {x}": "{x} 卡池未抽中傳說的次數：{x}／{x}",
   "· A las {x} tiradas sin Legendaria en un banner, la siguiente lo es.": "· 同一卡池連續 {x} 抽未獲得傳說寶可夢，下次必定獲得。",
   "· La tirada ×10 garantiza al menos una Épica.": "· 十連抽保證至少獲得一隻史詩寶可夢。",
-  "· Los repetidos dan Pokémonedas (los shiny repetidos, el triple).": "· 重複寶可夢會轉換成寶可幣，重複異色可得三倍。",
+  "· Los repetidos dan Pokémonedas (los shiny repetidos, el triple).": "· 重複寶可夢會轉換成寶可幣，重複閃光可得三倍。",
   "· Los tickets se consiguen jugando: algunos Pokémon los sueltan al caer, y los jefes y los legendarios de las grietas dan tickets ×10.": "· 抽獎券可透過遊玩獲得：部分寶可夢被擊敗時會掉落，首領與裂隙中的傳說寶可夢會掉落十連抽獎券。",
   "Tirar ×1 ·": "單抽 ·",
   "Tirar ×10 ·": "十連抽 ·",
@@ -640,18 +698,18 @@
   "tickets y {x}": "抽獎券與 {x}",
   "No tienes tickets suficientes: consíguelos jugando": "抽獎券不足，請透過遊玩獲得",
   "¡NUEVO!": "首次獲得！",
-  "¡SHINY NUEVO!": "新異色！",
+  "¡SHINY NUEVO!": "新閃光！",
   "Repetido ·": "重複 ·",
-  "· {x} {x} shiny": "· {x} {x} 異色",
-  "{x} Shiny": "{x} 異色",
+  "· {x} {x} shiny": "· {x} {x} 閃光",
+  "{x} Shiny": "{x} 閃光",
   "Clic para acelerar": "點擊加速",
   "TIRADA": "抽獎",
   "TIRADA ×10": "十連抽",
   "¡SUERTE!": "祝你好運！",
-  "¡¿SHINY?!": "異色？！",
+  "¡¿SHINY?!": "閃光？！",
   "¡¿LEGENDARIO?!": "傳說？！",
   "¡¿ÉPICO?!": "史詩？！",
-  "SHINY ·": "異色 ·",
+  "SHINY ·": "閃光 ·",
   "Logros": "成就",
   "Perfil": "個人檔案",
   "Diarias": "每日",
@@ -689,11 +747,11 @@
   "Legendarios": "傳說寶可夢",
   "Cerrar": "關閉",
   "Derrota a {x} Pokémon": "擊敗 {x} 隻寶可夢",
-  "Derrota a {x} Pokémon de tipo {x}": "擊敗 {x} 隻 {x} 屬性寶可夢",
+  "Derrota a {x} Pokémon de tipo {x}": "擊敗 {x} 隻 {x}系寶可夢",
   "Derrota a {x} jefes": "擊敗 {x} 隻首領",
   "Derrota a un jefe": "擊敗一隻首領",
   "Aguanta {x} minutos en una run": "在一局中生存 {x} 分鐘",
-  "Aguanta {x} minutos con un Pokémon de tipo {x}": "生存 {x} 分鐘，使用 {x} 屬性寶可夢",
+  "Aguanta {x} minutos con un Pokémon de tipo {x}": "生存 {x} 分鐘，使用 {x}系寶可夢",
   "Llega al nivel {x} en una run": "在一局中達到 {x} 級",
   "Recoge {x} monedas en tus runs": "遊玩時收集 {x} 枚金幣",
   "Abre un cofre con candado": "開啟一個上鎖寶箱",
@@ -725,11 +783,11 @@
   "Ten los {x} Pokémon del juego.": "擁有遊戲中全部 {x} 隻寶可夢。",
   "Ten todos los Pokémon del juego.": "擁有遊戲中的所有寶可夢。",
   "Algo brilla": "閃耀的光芒",
-  "Ojo para el brillo": "慧眼識異色",
-  "Cazashinies": "異色獵人",
-  "Consigue 1 shiny.": "獲得 1 隻異色寶可夢。",
-  "Consigue 5 shinies.": "獲得 5 隻異色寶可夢。",
-  "Consigue 20 shinies.": "獲得 20 隻異色寶可夢。",
+  "Ojo para el brillo": "慧眼識閃光",
+  "Cazashinies": "閃光獵人",
+  "Consigue 1 shiny.": "獲得 1 隻閃光寶可夢。",
+  "Consigue 5 shinies.": "獲得 5 隻閃光寶可夢。",
+  "Consigue 20 shinies.": "獲得 20 隻閃光寶可夢。",
   "Calentando": "熱身中",
   "Superviviente": "生存者",
   "Resistente": "堅韌",
@@ -764,7 +822,7 @@
   "Explorador": "探索者",
   "Gana tu primera pelea en una grieta.": "贏得第一場裂隙戰鬥。",
   "Gana 10 peleas en grietas.": "贏得 10 場裂隙戰鬥。",
-  "Gana en las 18 arenas (una por tipo).": "在全部 18 種屬性競技場獲勝。",
+  "Gana en las 18 arenas (una por tipo).": "在全部 18 座系別競技場獲勝。",
   "Cazalegendarios": "傳說獵人",
   "Domador de mitos": "神話馴服者",
   "Vence a 10 legendarios distintos.": "擊敗 10 種不同的傳說寶可夢。",
@@ -1114,7 +1172,7 @@
   "×1,9 daño, más distancia y menos recarga": "傷害 ×1.9、距離增加、冷卻時間縮短",
   "×1,8 daño, charcos más grandes y duraderos": "傷害 ×1.8、毒池範圍與持續時間增加",
   "×1,7 daño, +4 disparos y +1 perforación": "傷害 ×1.7、射擊數 +4、貫穿 +1",
-  "¡Horda de tipo {x}!": "{x} 屬性敵潮來襲！",
+  "¡Horda de tipo {x}!": "{x}系敵潮來襲！",
   "¡Hora dorada! Doble de experiencia": "黃金時刻！經驗值加倍",
   "¡Un {x} se ha perdido! Búscalo y llévalo a la marca": "一隻 {x} 迷路了！找到牠並帶往標記處",
   "¡{x} te sigue! Llévalo a la marca verde": "{x} 正跟著你！帶牠前往綠色標記",
@@ -2109,9 +2167,9 @@
   "Galar": "伽勒爾",
   "Paldea": "帕底亞",
   "Solo": "單人",
-  "Shiny": "異色",
-  "shiny": "異色",
-  "shinies": "異色寶可夢",
+  "Shiny": "閃光",
+  "shiny": "閃光",
+  "shinies": "閃光寶可夢",
   "HP": "體力",
   "ATQ": "攻擊",
   "VEL": "速度",
@@ -2139,7 +2197,7 @@
   "solitario": "獨立",
   "tranquilo": "悠閒",
   "caótico": "難以捉摸",
-  "Tienes su shiny": "已擁有異色版本",
+  "Tienes su shiny": "已擁有閃光版本",
   "Aún no estás en el top 50 {x} {x}. Tu puesto exacto está en Histórico.": "尚未進入 {x} {x} 的前 50 名。可在歷史紀錄查看確切排名。",
   "con": "使用",
   "Nº": "編號",
@@ -2482,11 +2540,11 @@
   "Sandstorm": "沙暴",
   "Snowfall": "降雪",
   "Fog": "霧",
-  "Water is boosted and Fire is weakened": "水屬性增強，火屬性減弱",
-  "Fire is boosted and Water is weakened": "火屬性增強，水屬性減弱",
-  "Rock, Ground and Steel are boosted; the rest suffer": "岩石、地面與鋼屬性增強，其他屬性受到傷害",
-  "Ice is boosted; the rest suffer and slow down": "冰屬性增強，其他屬性受到傷害並減速",
-  "Ghost, Fairy and Psychic are boosted": "幽靈、妖精與超能力屬性增強",
+  "Water is boosted and Fire is weakened": "水系增強，火系減弱",
+  "Fire is boosted and Water is weakened": "火系增強，水系減弱",
+  "Rock, Ground and Steel are boosted; the rest suffer": "岩石、地面與鋼系增強，其他系受到傷害",
+  "Ice is boosted; the rest suffer and slow down": "冰系增強，其他系受到傷害並減速",
+  "Ghost, Fairy and Psychic are boosted": "幽靈、妖精與超能力系增強",
   "Eternal Meadow": "永恆草原",
   "Igneous Volcano": "熾焰火山",
   "Sea Grotto": "海濱洞窟",
@@ -2512,13 +2570,13 @@
   "Rift ·": "裂隙 ·",
   "RIFT ·": "裂隙 ·",
   "A wild {x} appeared!": "野生的 {x} 出現了！",
-  "A wild shiny {x} appeared!": "野生的異色 {x} 出現了！",
-  "A shiny {x} is nearby!": "附近有異色 {x}！",
+  "A wild shiny {x} appeared!": "野生的閃光 {x} 出現了！",
+  "A shiny {x} is nearby!": "附近有閃光 {x}！",
   "Pokémon swarm!": "寶可夢大潮來襲！",
-  "You got a shiny {x}!": "獲得了異色 {x}！",
-  "Another shiny {x}! (+300 coins)": "又一隻異色 {x}！（+300 金幣）",
+  "You got a shiny {x}!": "獲得了閃光 {x}！",
+  "Another shiny {x}! (+300 coins)": "又一隻閃光 {x}！（+300 金幣）",
   "{x} was waiting in the rift!": "{x} 正在裂隙中等著你！",
-  "A shiny {x} was waiting in the rift!": "異色 {x} 正在裂隙中等著你！",
+  "A shiny {x} was waiting in the rift!": "閃光 {x} 正在裂隙中等著你！",
   "You defeated {x}! Grab your reward…": "你擊敗了 {x}！去領取獎勵吧…",
   "Cryptocurrencies": "加密貨幣",
   "PokéSurvivor has no official cryptocurrency, token or NFT, and its author has not created any. Any token using the game's name was created by third parties: we take no responsibility for any purchase, sale or investment you make with them, and nothing here is investment advice.": "PokéSurvivor 沒有任何官方加密貨幣、代幣或 NFT，作者也未發行過。使用遊戲名稱的代幣皆由第三方建立；我們不對任何相關買賣或投資負責，此處內容也不構成投資建議。",
@@ -2570,7 +2628,7 @@
   "Moves": "招式",
   "New time record!": "生存時間新紀錄！",
   "· new!": "· 新紀錄！",
-  "{x} shinies caught": "捕獲 {x} 隻異色寶可夢",
+  "{x} shinies caught": "捕獲 {x} 隻閃光寶可夢",
   "Gacha tickets": "扭蛋抽獎券",
   "Max level": "最高等級",
   "Mystery Dungeon": "不可思議的迷宮",
@@ -2584,7 +2642,7 @@
   "Survive the hordes with your partner Pokémon · free, on PC and mobile": "與寶可夢夥伴抵擋敵潮 · 電腦與手機皆可免費遊玩",
   "A Pokémon survival game, free in your browser and on mobile.": "免費的寶可夢生存遊戲，可在瀏覽器與手機遊玩。",
   "Loading…": "載入中…",
-  "Guide": "遊戲指南",
+  "Guide": "攻略",
   "Legal notice & privacy": "法律聲明與隱私權",
   "Your game is saved in the cloud: log in from any computer. Guest progress is not saved.": "遊戲進度儲存在雲端，可從任何電腦登入。訪客進度不會保留。",
   "Opened from a file: your game is only saved in this browser. To save in the cloud, play the online version.": "目前以檔案開啟，進度只會儲存在此瀏覽器。雲端存檔需使用線上版本。",
@@ -2680,7 +2738,7 @@
   "Your collection": "你的收藏",
   "Upgrades": "強化",
   "Make every run stronger": "讓每一局都更強",
-  "9 regions · Pokémon and shinies": "9 個地區 · 寶可夢與異色寶可夢",
+  "9 regions · Pokémon and shinies": "9 個地區 · 寶可夢與閃光寶可夢",
   "Missions": "任務",
   "Missions, achievements and profile": "任務、成就與個人檔案",
   "Friends": "好友",
@@ -2722,9 +2780,9 @@
   "Choose as partner{x}": "選為夥伴{x}",
   "You don't have it yet.": "你尚未擁有這隻寶可夢。",
   "Get it from the banner of": "可從此地區的卡池獲得：",
-  "or by defeating it when it shows up shiny.": "或在野外遇見其異色版本並擊敗牠。",
+  "or by defeating it when it shows up shiny.": "或在野外遇見其閃光版本並擊敗牠。",
   "{x} is now your partner": "{x} 成為你的夥伴了",
-  "Shiny {x} is now your partner": "異色 {x} 成為你的夥伴了",
+  "Shiny {x} is now your partner": "閃光 {x} 成為你的夥伴了",
   "{x} · {x}: level {x}": "{x} · {x}：等級 {x}",
   "Mystery": "神祕",
   "The {x} Pokémon of generation {x}. The legendaries await!": "共 {x} 隻第 {x} 世代寶可夢，傳說寶可夢等著你！",
@@ -2740,13 +2798,13 @@
   "tickets and {x}": "抽獎券與 {x}",
   "Not enough tickets: earn them by playing": "抽獎券不足，請透過遊玩獲得",
   "NEW!": "首次獲得！",
-  "NEW SHINY!": "新異色！",
+  "NEW SHINY!": "新閃光！",
   "Duplicate ·": "重複 ·",
   "Click to speed up": "點擊加速",
   "PULL": "抽獎",
   "PULL ×10": "十連抽",
   "GOOD LUCK!": "祝你好運！",
-  "SHINY?!": "異色？！",
+  "SHINY?!": "閃光？！",
   "LEGENDARY?!": "傳說？！",
   "EPIC?!": "史詩？！",
   "Achievements": "成就",
@@ -2786,11 +2844,11 @@
   "Legendaries": "傳說寶可夢",
   "Close": "關閉",
   "Defeat {x} Pokémon": "擊敗 {x} 隻寶可夢",
-  "Defeat {x} {x}-type Pokémon": "擊敗 {x} 隻 {x} 屬性寶可夢",
+  "Defeat {x} {x}-type Pokémon": "擊敗 {x} 隻 {x}系寶可夢",
   "Defeat {x} bosses": "擊敗 {x} 隻首領",
   "Defeat a boss": "擊敗一隻首領",
   "Survive {x} minutes in a run": "在一局中生存 {x} 分鐘",
-  "Survive {x} minutes with a {x}-type Pokémon": "生存 {x} 分鐘，使用 {x} 屬性寶可夢",
+  "Survive {x} minutes with a {x}-type Pokémon": "生存 {x} 分鐘，使用 {x}系寶可夢",
   "Reach level {x} in a run": "在一局中達到 {x} 級",
   "Collect {x} coins in your runs": "遊玩時收集 {x} 枚金幣",
   "Open a locked chest": "開啟一個上鎖寶箱",
@@ -2822,11 +2880,11 @@
   "Own all {x} Pokémon in the game.": "擁有遊戲中全部 {x} 隻寶可夢。",
   "Own every Pokémon in the game.": "擁有遊戲中的所有寶可夢。",
   "Something shines": "閃耀的光芒",
-  "An eye for shine": "慧眼識異色",
-  "Shiny hunter": "異色獵人",
-  "Get 1 shiny.": "獲得 1 隻異色寶可夢。",
-  "Get 5 shinies.": "獲得 5 隻異色寶可夢。",
-  "Get 20 shinies.": "獲得 20 隻異色寶可夢。",
+  "An eye for shine": "慧眼識閃光",
+  "Shiny hunter": "閃光獵人",
+  "Get 1 shiny.": "獲得 1 隻閃光寶可夢。",
+  "Get 5 shinies.": "獲得 5 隻閃光寶可夢。",
+  "Get 20 shinies.": "獲得 20 隻閃光寶可夢。",
   "Warming up": "熱身中",
   "Survivor": "生存者",
   "Tough": "堅韌",
@@ -2861,7 +2919,7 @@
   "Explorer": "探索者",
   "Win your first rift battle.": "贏得第一場裂隙戰鬥。",
   "Win 10 rift battles.": "贏得 10 場裂隙戰鬥。",
-  "Win in all 18 arenas (one per type).": "在全部 18 種屬性競技場獲勝。",
+  "Win in all 18 arenas (one per type).": "在全部 18 座系別競技場獲勝。",
   "Legend hunter": "傳說獵人",
   "Myth tamer": "神話馴服者",
   "Defeat 10 different legendaries.": "擊敗 10 種不同的傳說寶可夢。",
@@ -3083,7 +3141,7 @@
   "free and non-profit": "免費且非營利",
   "Fan game {x}: no ads or payments. Pokémon and its characters are owned by Nintendo, Creatures and GAME FREAK; this project is not affiliated with them.": "同人遊戲，{x}，無廣告或付費內容。寶可夢及其角色由 Nintendo、Creatures 與 GAME FREAK 擁有，本專案與上述公司無關。",
   ": no ads or payments. Pokémon and its characters are owned by Nintendo, Creatures and GAME FREAK; this project is not affiliated with them.": "，無廣告或付費內容。寶可夢及其角色由 Nintendo、Creatures 與 GAME FREAK 擁有，本專案與上述公司無關。",
-  "Credits": "製作名單",
+  "Credits": "製作與素材來源",
   "PMD SpriteCollab and its artists (CC BY-NC 4.0).": "PMD SpriteCollab 與參與創作者（CC BY-NC 4.0）。",
   "Pokémon data:": "寶可夢資料：",
   "Music and sounds:": "音樂與音效：",
@@ -3224,7 +3282,7 @@
   "×1.9 damage, more distance and less cooldown": "傷害 ×1.9、距離增加、冷卻時間縮短",
   "×1.8 damage, bigger and longer-lasting pools": "傷害 ×1.8、毒池範圍與持續時間增加",
   "×1.7 damage, +4 shots and +1 pierce": "傷害 ×1.7、射擊數 +4、貫穿 +1",
-  "A {x}-type horde!": "{x} 屬性敵潮來襲！",
+  "A {x}-type horde!": "{x}系敵潮來襲！",
   "Golden hour! Double experience": "黃金時刻！經驗值加倍",
   "A {x} is lost! Find it and take it to the marker": "一隻 {x} 迷路了！找到牠並帶往標記處",
   "{x} is following you! Take it to the green marker": "{x} 正跟著你！帶牠前往綠色標記",
@@ -3252,7 +3310,7 @@
   "Search by name": "依名稱搜尋",
   "Buscar por nombre": "依名稱搜尋",
   "Wild Pokémon are getting stronger and stronger!": "野生寶可夢正變得越來越強！",
-  "· Duplicates give PokéCoins. Shinies never repeat.": "· 重複的寶可夢會轉換成寶可幣；異色寶可夢不會重複。",
+  "· Duplicates give PokéCoins. Shinies never repeat.": "· 重複的寶可夢會轉換成寶可幣；閃光寶可夢不會重複。",
   "· Tickets are earned by playing: some Pokémon drop them when defeated, and bosses and rift legendaries sometimes give ×10 tickets.": "· 遊玩即可獲得抽獎券：部分寶可夢被擊敗時會掉落，頭目和裂縫中的傳說寶可夢有時會掉落十連抽獎券。",
   "Paused: {x} is choosing…": "已暫停：{x} 正在選擇…",
   "Paused: {x} are choosing…": "已暫停：{x} 正在選擇…",
@@ -3282,7 +3340,7 @@
   "The game now updates itself when a new version is out: within 5 seconds if you are in the menu, or after your run if you are playing (without losing anything).": "推出新版本時，遊戲會自動更新：停留在選單時會在 5 秒內更新；正在遊玩時則等本局結束後更新，不會遺失進度與獎勵。",
   "A \"What's new\" button (this window) with every change to the game.": "新增「更新公告」按鈕（就是這個視窗），可查看遊戲的各項更新。",
   "Easier to read numbers: 2, 5 and 8 no longer look alike.": "改善數字字型，讓 2、5、8 更容易分辨。",
-  "Pick the normal or shiny version of your partner right from the main menu, under it.": "可直接在主選單的夥伴下方，切換一般或異色外觀。",
+  "Pick the normal or shiny version of your partner right from the main menu, under it.": "可直接在主選單的夥伴下方，切換一般或閃光外觀。",
   "New upgrades for each Pokémon: Critical Hit (+3% critical chance per level, crits deal x1.5 damage), Card reroll (+1 level-up card reroll per run) and Ban (block moves so they never show up in your cards; pick them in Upgrades).": "各寶可夢新增強化項目：「擊中要害」（每級提高 3% 擊中要害機率，造成 1.5 倍傷害）、「卡片重抽」（每局升級卡片重抽次數 +1）及「招式封鎖」（在強化頁選擇招式，使其不再出現在升級卡片中）。",
   "Move shortcuts (in Upgrades, for each Pokémon): choose which move always goes in each slot, for example Confusion always on 1, for muscle memory.": "招式欄位設定：可在各寶可夢的強化頁設定招式固定使用的欄位，例如將「念力」固定在第 1 格，方便熟悉操作。",
   "Rock Slide deals less damage (21 instead of 26): it defeated almost twice as many as the average move.": "「岩崩」傷害從 26 下調為 21；原本的擊敗數量接近一般招式的兩倍。",
@@ -3290,7 +3348,7 @@
   "Rift legendaries no longer always drop x10 tickets: they drop one half of the time (they used to always drop 2, which was too many).": "裂縫中的傳說寶可夢不再必定掉落十連抽獎券，改為 50% 機率掉落 1 張；先前必定掉落 2 張，數量過多。",
   "Co-op: if your networks cannot connect to each other, the room says so and keeps retrying, instead of playing laggy through a slow server.": "多人合作：若彼此的網路無法直接連線，房間會顯示提示並持續重試，不再改用速度較慢的伺服器而造成遊戲卡頓。",
   "We moved to new servers so the game can stay free: you may need to sign in again (with the same account and password, or with Google). Your save and your Pokémon are unchanged.": "為了讓遊戲持續免費營運，已搬遷至新的伺服器。你可能需要以原帳號密碼或 Google 重新登入；存檔與寶可夢不受影響。",
-  "Gacha: shinies no longer come out as duplicates. If you roll one you already have, you get another of the same rarity that you are missing.": "扭蛋：異色寶可夢不再重複。若抽到已擁有的異色寶可夢，會改成同稀有度、尚未擁有的異色寶可夢。",
+  "Gacha: shinies no longer come out as duplicates. If you roll one you already have, you get another of the same rarity that you are missing.": "扭蛋：閃光寶可夢不再重複。若抽到已擁有的閃光寶可夢，會改成同稀有度、尚未擁有的閃光寶可夢。",
   "Less random rifts: every time one does not show up, the next one is more likely (at most 2.5 minutes without a rift).": "調整裂縫出現機制：每次未出現裂縫，下次出現的機率就會提高，最長不會超過 2.5 分鐘沒有裂縫。",
   "Legendaries you have not beaten yet show up 4 times as often in rifts.": "尚未擊敗的傳說寶可夢，在裂縫中的出現機率提高為 4 倍。",
   "Healers heal more the harder you hit, but with diminishing returns and a cap (2.5x at most).": "你的攻擊越強，治療型敵人的回復量也越高，但增幅會逐漸減少，最高為原本的 2.5 倍。",
@@ -3311,7 +3369,7 @@
   "Bonds: defeating a legendary lets you fuse moves that fire at the same time from a single slot (up to 4).": "羈絆：擊敗傳說寶可夢後，可以融合招式，讓同一欄位同時施放最多 4 個招式。",
   "A button to reroll the level-up cards.": "新增升級卡片重抽按鈕。",
   "More rifts.": "增加裂縫出現頻率。",
-  "Weaker psychic moves and healers.": "下調超能力屬性招式與治療型敵人的強度。",
+  "Weaker psychic moves and healers.": "下調超能力系招式與治療型敵人的強度。",
   "Level-up card upgrades (speed, cooldown, experience, magnet, armor and power) can only be taken a limited number of times.": "升級卡片中的速度、冷卻、經驗、磁力、防禦與威力強化，新增選取次數上限。",
   "On mobile, the Pokémon details show alongside; logging in is faster and the x10 gacha can be closed.": "手機版寶可夢詳細資料改為顯示在旁邊；登入速度更快，十連扭蛋畫面也可以關閉。",
   "Black screen in runs longer than an hour because image memory filled up.": "修正遊玩超過一小時後，因圖片記憶體耗盡而黑畫面的問題。",
@@ -3321,7 +3379,7 @@
   "More challenge": "更具挑戰性",
   "Bosses and legendaries with 4 telegraphed attacks that get enraged at half health.": "頭目與傳說寶可夢擁有 4 種附帶預警的攻擊，體力降至一半時會進入狂暴狀態。",
   "12 new moves and 8 new ways to attack: boomerang, chain, mines, meteors, turret, dash, trail and spray.": "新增 12 個招式與 8 種攻擊形式：迴旋、連鎖、地雷、隕石、砲塔、衝刺、軌跡及扇形攻擊。",
-  "Mid-run events (single-type hordes, golden hour, lost Pokémon) and Meowth and Gholdengo running away loaded with coins.": "新增戰局事件（單一屬性群襲、黃金時段、迷路的寶可夢），以及攜帶大量金幣逃跑的喵喵與賽富豪。",
+  "Mid-run events (single-type hordes, golden hour, lost Pokémon) and Meowth and Gholdengo running away loaded with coins.": "新增戰局事件（單一系群襲、黃金時段、迷路的寶可夢），以及攜帶大量金幣逃跑的喵喵與賽富豪。",
   "Statues for big Pokémon.": "為大型寶可夢新增雕像。",
   "Harder: fewer but tougher enemies.": "提高難度：敵人數量減少，但實力更強。",
   "Levelling up is slower, tickets are rarer and bosses drop a x10 ticket one time in three.": "升級速度降低，抽獎券更稀有；頭目有三分之一機率掉落 1 張十連抽獎券。",
@@ -3337,9 +3395,9 @@
   "Missions, rifts and co-op": "任務、裂縫與多人合作",
   "Daily and weekly missions, achievements with medals and titles, and a public profile.": "新增每日與每週任務、附帶獎章與稱號的成就，以及公開個人檔案。",
   "Held items, move evolutions and enemies that heal, shield, summon or explode.": "新增攜帶道具、招式進化，以及會治療、提供護盾、召喚或爆炸的敵人。",
-  "Rifts leading to 18 legendary arenas, one per type, and weather that changes the fight.": "新增通往 18 座傳說競技場的裂縫（各屬性一座），以及會影響戰鬥的天氣。",
+  "Rifts leading to 18 legendary arenas, one per type, and weather that changes the fight.": "新增通往 18 座傳說競技場的裂縫（各系一座），以及會影響戰鬥的天氣。",
   "Co-op with your friends list and leaderboards.": "新增好友名單、多人合作與排行榜。",
-  "Upgrades for each Pokémon, a slot-machine ticket gacha and a type chart.": "新增各寶可夢的強化系統、使用抽獎券的拉霸式扭蛋，以及屬性相剋表。",
+  "Upgrades for each Pokémon, a slot-machine ticket gacha and a type chart.": "新增各寶可夢的強化系統、使用抽獎券的拉霸式扭蛋，以及系相剋表。",
   "Camera further away and enemies that avoid obstacles.": "拉遠鏡頭，敵人也會繞過障礙物。",
   "Camera further out and enemies that walk around obstacles.": "拉遠鏡頭，敵人也會繞過障礙物。",
   "First version": "首個版本",
@@ -3350,8 +3408,136 @@
   "Cambios": "調整",
   "Fixes": "修正",
   "Arreglos": "修正",
-  "¡Los Pokémon salvajes se vuelven cada vez más fuertes!": "野生寶可夢正變得越來越強！",
-  "· Los repetidos dan Pokémonedas. Los shiny no se repiten.": "· 重複的寶可夢會轉換成寶可幣；異色寶可夢不會重複。",
+  "Ruins of Judgment": "審判遺跡",
+  "THE JUDGMENT": "審判",
+  "OF ARCEUS": "阿爾宙斯",
+  "Time has run out…": "時間已到…",
+  "ARCEUS HAS DESCENDED!": "阿爾宙斯降臨了！",
+  "It is invincible: run and survive as long as you can": "牠無法被擊敗：快逃，盡可能撐下去！",
+  "Tap the screen to skip": "點擊螢幕跳過",
+  "Press Space to skip": "按空白鍵跳過",
+  "Run from Arceus! It is invincible": "快逃離阿爾宙斯！牠無法被擊敗",
+  "{x} answers the Judgment!": "{x} 應審判之召現身！",
+  "JUDGMENT · {x} · BOSSES {x}": "審判 · {x} · 頭目 {x}",
+  "Against Arceus": "對抗阿爾宙斯",
+  "{x} · {x} legendaries": "{x} · {x} 隻傳說寶可夢",
+  "{x} · {x} legendary": "{x} · {x} 隻傳說寶可夢",
+  "The Judgment": "審判",
+  "Reach the Judgment of Arceus (minute 30).": "抵達阿爾宙斯的審判（第 30 分鐘）。",
+  "Before the Creator": "直面創世者",
+  "Survive 1 minute against Arceus.": "面對阿爾宙斯，存活 1 分鐘。",
+  "Divine challenge": "神之試煉",
+  "Defeat 3 legendaries against Arceus in a single run.": "在同一局面對阿爾宙斯時，擊敗 3 隻傳說寶可夢。",
+  "Judged": "受審者",
+  "Chosen of Arceus": "阿爾宙斯的天選者",
+  "Report suspicious record": "檢舉可疑紀錄",
+  "You already reported it": "你已檢舉過這筆紀錄",
+  "You already reported this record": "你已檢舉過這筆紀錄",
+  "Report {x}'s record as cheating?": "要檢舉 {x} 的紀錄涉嫌作弊嗎？",
+  "Thanks: we will review it": "感謝檢舉，我們會進行審查",
+  "ARCEUS · {x} m": "阿爾宙斯 · {x} 公尺",
+  "The Judgment of Arceus": "阿爾宙斯的審判",
+  "The Judgment of Arceus: at minute 30, Arceus descends from the sky and takes you to the Ruins of Judgment. It is invincible, chases you faster and faster and casts pillars of light, beams and shockwaves; if it touches you, you lose almost half your HP. Every 5 seconds a legendary joins, each with twice the HP and damage of the previous one. How long can you last?": "阿爾宙斯的審判：到達第 30 分鐘時，阿爾宙斯會從天而降，將你帶往審判遺跡。牠無法被擊敗，追趕速度會越來越快，還會施放光柱、光束與衝擊波；一旦碰到牠，就會損失將近一半體力。每隔 5 秒會有一隻傳說寶可夢加入，體力與傷害都是前一隻的兩倍。你能撐多久？",
+  "Three new achievements: The Judgment (reach minute 30), Before the Creator (survive 1 minute against Arceus) and Divine challenge (defeat 3 legendaries against Arceus in a single run).": "新增三項成就：「審判」（抵達第 30 分鐘）、「直面創世者」（面對阿爾宙斯存活 1 分鐘）及「神之試煉」（在同一局面對阿爾宙斯時擊敗 3 隻傳說寶可夢）。",
+  "New music for the fight against Arceus.": "新增對抗阿爾宙斯時的戰鬥音樂。",
+  "A button to report suspicious records on the leaderboard (the little flag on each row).": "排行榜新增可疑紀錄檢舉按鈕（每列的小旗子）。",
+  "The all-time leaderboard starts from scratch: now that runs end against Arceus, older records could no longer be reached. The daily, weekly and monthly boards are unchanged.": "歷史排行榜重新開始：現在戰局會在對抗阿爾宙斯的階段結束，舊紀錄已無法再達成，因此重置歷史榜。每日、每週與每月排行榜保持不變。",
+  "Overtime from minute 60 is removed (runs no longer get that far).": "移除第 60 分鐘起的延長戰局機制，因為現在已無法存活到那個階段。",
+  "Rifts no longer open from minute 28 on, so the Judgment does not catch you inside one.": "從第 28 分鐘起不再開啟裂縫，避免審判開始時玩家仍在裂縫中。",
+  "Leaderboard protected against cheating: the server checks that every record was really played. You never lose anything you earn by playing.": "排行榜新增反作弊保護：伺服器會確認每筆成績都來自實際遊玩，但不會因此扣除你遊玩獲得的獎勵。",
+  "Records over 35 minutes have been removed from the leaderboard: with the Judgment of Arceus they are no longer possible.": "已移除排行榜中超過 35 分鐘的紀錄；在阿爾宙斯的審判機制下，這些成績已不可能達成。",
+  "Moderación": "排行榜管理",
+  "Reportes": "檢舉紀錄",
+  "Cuentas marcadas": "已標記帳號",
+  "¿Quitar del ranking TODAS las marcas de más de 35 minutos (todas las tablas)? No se puede deshacer.": "確定要從所有排行榜移除全部超過 35 分鐘的紀錄嗎？此操作無法復原。",
+  "Revisando {x} / {x}…": "檢查中：{x}／{x}…",
+  "Quitadas {x} marcas de más de 35 min ({x} tablas)": "已移除 {x} 筆超過 35 分鐘的紀錄（共 {x} 個排行榜）",
+  "No se pudo: {x}": "操作失敗：{x}",
+  "Quitar marcas de más de 35 min": "移除超過 35 分鐘的紀錄",
+  "No se pudo cargar ({x}).": "無法載入（{x}）。",
+  "No hay reportes.": "目前沒有檢舉紀錄。",
+  "veces reportada": "被檢舉次數",
+  "ya no está en el top 50": "已不在前 50 名",
+  "Más de 33 min: casi imposible con la Sentencia de Arceus": "超過 33 分鐘：在阿爾宙斯的審判中幾乎不可能達成",
+  "Borrar marca": "刪除紀錄",
+  "Marca borrada": "已刪除紀錄",
+  "Banear": "禁止上榜",
+  "¿Banear a {x}? No podrán volver a salir en el ranking y se borra su marca.": "確定要禁止 {x} 上榜嗎？他們將無法再登上排行榜，現有紀錄也會被刪除。",
+  "Baneado": "已禁止上榜",
+  "Descartar": "駁回",
+  "Reporte descartado": "已駁回檢舉",
+  "No hay cuentas marcadas.": "目前沒有已標記帳號。",
+  "Desmarcar": "解除標記",
+  "Desmarcada": "已解除標記",
+  "Forgot your password?": "忘記密碼？",
+  "Afraid of losing your account?": "擔心帳號找不回來？",
+  "Link my Gmail": "連結我的 Gmail",
+  "Don't ask again": "不要再詢問",
+  "Gmail linked! If you forget your password, sign in with Google.": "已連結 Gmail！若忘記密碼，可以使用 Google 登入。",
+  "That Gmail already has its own game account. Use another Gmail.": "這個 Gmail 已有另一個遊戲帳號，請改用其他 Gmail。",
+  "Sign in first.": "請先登入。",
+  "Recover your account with Gmail": "透過 Gmail 找回帳號",
+  "If you play with a name and password, you can link your Gmail: if you ever forget your password, sign in with Google and it is the same account. We offer it when you sign in.": "使用名稱和密碼登入的玩家，可以連結 Gmail；之後若忘記密碼，使用 Google 登入就能回到同一個帳號。登入時會出現連結提示。",
+  "Gacha pulls, new Pokémon and rewards are saved to the cloud right away. If you opened the game on another device or browser and something was missing, open it again where you got it: it comes back on its own.": "扭蛋結果、新獲得的寶可夢和獎勵，現在都會立即儲存至雲端。若在其他裝置或瀏覽器開啟遊戲時發現內容缺少，請回到原本獲得它們的裝置或瀏覽器重新開啟遊戲，就會自動恢復。",
+  "Si vinculaste tu Gmail, pulsa": "若已連結 Gmail，請使用該 Gmail 按下",
+  "con ese Gmail: es tu misma cuenta. Si no lo vinculaste, no se puede recuperar: crea una cuenta nueva (y esta vez vincula tu Gmail desde el aviso que sale al entrar).": "，即可回到原本的帳號。若未連結，便無法找回帳號；請建立新帳號，並在登入後出現的提示中連結 Gmail。",
+  "Vincula tu Gmail: si un día olvidas la contraseña, pulsas": "連結 Gmail 後，若忘記密碼，只要按下",
+  "y es tu misma cuenta, con todo lo tuyo.": "，即可登入原帳號，保留所有資料。",
+  "¿Quitar del ranking TODAS las marcas de más de 1 hora (todas las tablas)? No se puede deshacer.": "確定要從所有排行榜移除全部超過 1 小時的紀錄嗎？此操作無法復原。",
+  "Quitadas {x} marcas de más de 1 hora ({x} tablas)": "已移除 {x} 筆超過 1 小時的紀錄（共 {x} 個排行榜）",
+  "Quitar marcas de más de 1 hora": "移除超過 1 小時的紀錄",
+  "Baneados": "已禁止上榜的帳號",
+  "No hay cuentas baneadas.": "目前沒有被禁止上榜的帳號。",
+  "Desbanear": "恢復上榜資格",
+  "Desbaneada": "已恢復上榜資格",
+  "The weekly and monthly leaderboards start from scratch, like the all-time one: now only runs with the Judgment of Arceus count, and all boards match each other.": "每週與每月排行榜和總排行榜一樣重新開始計算，現在只計入採用阿爾宙斯審判機制的遊戲紀錄，讓各排行榜的計算標準一致。",
+  "Co-op: the game no longer freezes with each player waiting for the other to choose. An item and the level-up cards no longer cover each other, and if the connection drops a message it fixes itself.": "合作模式：修正玩家互相等待對方選擇，導致遊戲停住的問題。道具與升級卡片不再互相遮擋；連線若漏傳訊息，也能自動恢復。",
+  "Co-op: after coming back from a rift, players who are not the host can see every enemy again (some used to be invisible, with only their attacks showing).": "合作模式：從裂縫返回後，非房主玩家也能正常看見所有敵人；先前部分敵人會隱形，只看得到牠們的攻擊。",
+  "Friends: if your phone or computer has the wrong time (or time zone), your friends no longer always show as offline and their invitations reach you.": "好友功能：即使手機或電腦的時間、時區設定不正確，好友也不會一直顯示為離線，並能正常收到好友邀請。",
+  "con ese Gmail: es tu misma Account. Si no lo vinculaste, no se puede recuperar: crea una Account nueva (y esta vez vincula tu Gmail desde el aviso que sale al Log in).": "，即可回到原本的帳號。若未連結，便無法找回帳號；請建立新帳號，並在登入後出現的提示中連結 Gmail。",
+  "Vincula tu Gmail: si un día olvidas la Password, pulsas": "連結 Gmail 後，若忘記密碼，只要按下",
+  "y es tu misma Account, con todo lo tuyo.": "，即可登入原帳號，保留所有資料。",
+  "¿Remove del Leaderboard TODAS las marcas de más de 1 hora (todas las tablas)? No se puede deshacer.": "確定要從所有排行榜移除全部超過 1 小時的紀錄嗎？此操作無法復原。",
+  "Remove marcas de más de 1 hora": "移除超過 1 小時的紀錄",
+  "PokéSurvivor: Pokemon Survivor Game Guide & Pokédex": "PokéSurvivor：生存遊戲攻略與寶可夢圖鑑",
+  "PokéSurvivor: Play the Pokemon Survivor Game Online": "PokéSurvivor：線上遊玩寶可夢生存遊戲",
+  "Play PokéSurvivor — the Pokemon Survivor Game": "遊玩 PokéSurvivor：寶可夢生存遊戲",
+  "Skip to content": "跳至主要內容",
+  "Home": "首頁",
+  "Type": "系",
+  "Types": "系別",
+  "Tipo": "系",
+  "Tipos": "系別",
+  "Tier list": "強度排行",
+  "Play free": "免費遊玩",
+  "Free fan game · runs in your browser": "免費同人遊戲 · 使用瀏覽器遊玩",
+  "survival guide, Pokédex and type chart": "生存攻略、寶可夢圖鑑與系別相剋表",
+  "Play PokéSurvivor free": "免費遊玩 PokéSurvivor",
+  "Start with the beginner guide": "先看新手攻略",
+  "playable Pokémon": "隻可用寶可夢",
+  "regions, Kanto to Paldea": "個地區，從關都到帕底亞",
+  "moves · 59 evolve": "個招式 · 其中 59 個可進化",
+  "rift arenas": "座裂縫競技場",
+  "Read the guide": "閱讀攻略",
+  "regions": "個地區",
+  "starters": "隻初始夥伴",
+  "Browse the Pokédex": "瀏覽寶可夢圖鑑",
+  "evolvable": "個可進化招式",
+  "See all moves": "查看全部招式",
+  "arenas": "座競技場",
+  "Legendaries & arenas": "傳說寶可夢與競技場",
+  "Open the type chart": "查看系別相剋表",
+  "Generation": "世代",
+  "Everything on this site": "網站導覽",
+  "Open the Pokédex": "開啟寶可夢圖鑑",
+  "See the arenas": "查看競技場",
+  "Browse moves": "瀏覽招式",
+  "Ready to try a run?": "準備好開始一局了嗎？",
+  "PokéSurvivor Guide": "PokéSurvivor 攻略",
+  "Fan project notice": "同人作品聲明",
+  "Open menu": "開啟選單",
+  "Close menu": "關閉選單",
+  "· Los repetidos dan Pokémonedas. Los shiny no se repiten.": "· 重複的寶可夢會轉換成寶可幣；閃光寶可夢不會重複。",
   "· Los tickets se consiguen jugando: algunos Pokémon los sueltan al caer, y los jefes y los legendarios de las grietas, a veces, tickets ×10.": "· 遊玩即可獲得抽獎券：部分寶可夢被擊敗時會掉落，頭目和裂縫中的傳說寶可夢有時會掉落十連抽獎券。",
   "Pausa: {x} está eligiendo…": "已暫停：{x} 正在選擇…",
   "Pausa: {x} están eligiendo…": "已暫停：{x} 正在選擇…",
@@ -3374,8 +3560,59 @@
   "Toca los movimientos que no quieres que te salgan en las cartas ({x}). El movimiento de inicio no se puede vetar.": "點選不想出現在升級卡片中的招式（{x}）。起始招式無法封鎖。",
   "Ya tienes {x} vetados: quita uno primero": "已封鎖 {x} 個招式，請先解除其中一個",
   "En iPhone, Safari no deja poner las webs a pantalla completa. Pulsa Compartir y luego \"Añadir a pantalla de inicio\": abriendo el juego desde ese icono se juega a pantalla completa.": "在 iPhone 上，Safari 不允許此網頁直接進入全螢幕。可點選「分享」→「加入主畫面」，再從該圖示以全螢幕開啟遊戲。",
-  "Todas las partidas cuentan": "每一局都算數",
-  "Ya no hay comprobaciones contra trampas: todas las partidas cuentan para el ranking y los récords, y no se pierde nada de lo ganado.": "移除反作弊檢查：每一局都會計入排行榜與個人紀錄，獲得的獎勵也不再因此被撤回。",
+  "Ruinas del Juicio": "審判遺跡",
+  "LA SENTENCIA": "審判",
+  "DE ARCEUS": "阿爾宙斯",
+  "El tiempo se ha agotado…": "時間已到…",
+  "¡ARCEUS HA DESCENDIDO!": "阿爾宙斯降臨了！",
+  "Es invencible: huye y aguanta todo lo que puedas": "牠無法被擊敗：快逃，盡可能撐下去！",
+  "Toca la pantalla para saltar": "點擊螢幕跳過",
+  "Pulsa Espacio para saltar": "按空白鍵跳過",
+  "¡Huye de Arceus! Es invencible": "快逃離阿爾宙斯！牠無法被擊敗",
+  "¡{x} acude a la Sentencia!": "{x} 應審判之召現身！",
+  "SENTENCIA · {x} · JEFES {x}": "審判 · {x} · 頭目 {x}",
+  "Ante Arceus": "對抗阿爾宙斯",
+  "{x} · {x} legendarios": "{x} · {x} 隻傳說寶可夢",
+  "{x} · {x} legendario": "{x} · {x} 隻傳說寶可夢",
+  "La Sentencia": "審判",
+  "Llega a la Sentencia de Arceus (minuto 30).": "抵達阿爾宙斯的審判（第 30 分鐘）。",
+  "Ante el Creador": "直面創世者",
+  "Aguanta 1 minuto ante Arceus.": "面對阿爾宙斯，存活 1 分鐘。",
+  "Desafío divino": "神之試煉",
+  "Derrota a 3 legendarios ante Arceus en una partida.": "在同一局面對阿爾宙斯時，擊敗 3 隻傳說寶可夢。",
+  "Juzgado": "受審者",
+  "Elegido de Arceus": "阿爾宙斯的天選者",
+  "¿Olvidaste tu contraseña?": "忘記密碼？",
+  "¿Te da miedo perder tu cuenta?": "擔心帳號找不回來？",
+  "Vincular mi Gmail": "連結我的 Gmail",
+  "No volver a preguntar": "不要再詢問",
+  "¡Gmail vinculado! Si olvidas la contraseña, entra con Google.": "已連結 Gmail！若忘記密碼，可以使用 Google 登入。",
+  "Ese Gmail ya tiene su propia cuenta del juego. Usa otro Gmail.": "這個 Gmail 已有另一個遊戲帳號，請改用其他 Gmail。",
+  "Inicia sesión primero.": "請先登入。",
+  "Reportar marca sospechosa": "檢舉可疑紀錄",
+  "Ya la has reportado": "你已檢舉過這筆紀錄",
+  "Ya has reportado esta marca": "你已檢舉過這筆紀錄",
+  "¿Reportar la marca de {x} como trampa?": "要檢舉 {x} 的紀錄涉嫌作弊嗎？",
+  "Gracias: la revisaremos": "感謝檢舉，我們會進行審查",
+  "Recupera tu cuenta con Gmail": "透過 Gmail 找回帳號",
+  "Si juegas con nombre y contraseña, puedes vincular tu Gmail: si un día olvidas la contraseña, entras con Google y es tu misma cuenta. Te lo ofrecemos al entrar.": "使用名稱和密碼登入的玩家，可以連結 Gmail；之後若忘記密碼，使用 Google 登入就能回到同一個帳號。登入時會出現連結提示。",
+  "Las tablas de la semana y del mes del ranking empiezan de cero, como el histórico: ahora sólo cuentan partidas con la Sentencia de Arceus y todas las tablas cuadran entre sí.": "每週與每月排行榜和總排行榜一樣重新開始計算，現在只計入採用阿爾宙斯審判機制的遊戲紀錄，讓各排行榜的計算標準一致。",
+  "Cooperativo: la partida ya no se queda parada con cada uno esperando a que el otro elija. Un objeto y las cartas de nivel ya no se tapan, y si la conexión pierde un aviso se arregla solo.": "合作模式：修正玩家互相等待對方選擇，導致遊戲停住的問題。道具與升級卡片不再互相遮擋；連線若漏傳訊息，也能自動恢復。",
+  "Cooperativo: al volver de una grieta, quien no era el anfitrión ya ve a todos los enemigos (antes algunos eran invisibles y sólo se veían sus ataques).": "合作模式：從裂縫返回後，非房主玩家也能正常看見所有敵人；先前部分敵人會隱形，只看得到牠們的攻擊。",
+  "Amigos: si tu móvil u ordenador tiene la hora (o la zona horaria) mal puesta, tus amigos ya no salen siempre desconectados y sus invitaciones te llegan.": "好友功能：即使手機或電腦的時間、時區設定不正確，好友也不會一直顯示為離線，並能正常收到好友邀請。",
+  "14 October 2026": "2026 年 10 月 14 日",
+  "14 de octubre de 2026": "2026 年 10 月 14 日",
+  "La Sentencia de Arceus": "阿爾宙斯的審判",
+  "La Sentencia de Arceus: al llegar al minuto 30, Arceus baja del cielo y te lleva a las Ruinas del Juicio. Es invencible, te persigue cada vez más deprisa y lanza pilares de luz, rayos y ondas; si te toca, te quita casi media vida. Cada 5 segundos acude un legendario con el doble de vida y de daño que el anterior. ¿Cuánto aguantarás?": "阿爾宙斯的審判：到達第 30 分鐘時，阿爾宙斯會從天而降，將你帶往審判遺跡。牠無法被擊敗，追趕速度會越來越快，還會施放光柱、光束與衝擊波；一旦碰到牠，就會損失將近一半體力。每隔 5 秒會有一隻傳說寶可夢加入，體力與傷害都是前一隻的兩倍。你能撐多久？",
+  "Tres logros nuevos: La Sentencia (llega al minuto 30), Ante el Creador (aguanta 1 minuto ante Arceus) y Desafío divino (derrota a 3 legendarios ante Arceus en una partida).": "新增三項成就：「審判」（抵達第 30 分鐘）、「直面創世者」（面對阿爾宙斯存活 1 分鐘）及「神之試煉」（在同一局面對阿爾宙斯時擊敗 3 隻傳說寶可夢）。",
+  "Música nueva para la pelea contra Arceus.": "新增對抗阿爾宙斯時的戰鬥音樂。",
+  "Botón para reportar marcas sospechosas en el ranking (la banderita de cada fila).": "排行榜新增可疑紀錄檢舉按鈕（每列的小旗子）。",
+  "El ranking histórico empieza de cero: ahora que las partidas acaban ante Arceus, las marcas de antes ya no se podrían alcanzar. Las tablas de hoy, de la semana y del mes siguen igual.": "歷史排行榜重新開始：現在戰局會在對抗阿爾宙斯的階段結束，舊紀錄已無法再達成，因此重置歷史榜。每日、每週與每月排行榜保持不變。",
+  "Se quita el tiempo extra del minuto 60 (ya no se llega hasta ahí).": "移除第 60 分鐘起的延長戰局機制，因為現在已無法存活到那個階段。",
+  "Desde el minuto 28 ya no se abren grietas, para que la Sentencia no te pille dentro de una.": "從第 28 分鐘起不再開啟裂縫，避免審判開始時玩家仍在裂縫中。",
+  "Ranking protegido contra trampas: el servidor comprueba que cada marca se ha jugado de verdad. Nunca se pierde nada de lo que ganas jugando.": "排行榜新增反作弊保護：伺服器會確認每筆成績都來自實際遊玩，但不會因此扣除你遊玩獲得的獎勵。",
+  "Se han quitado del ranking las marcas de más de 35 minutos: con la Sentencia de Arceus ya no son posibles.": "已移除排行榜中超過 35 分鐘的紀錄；在阿爾宙斯的審判機制下，這些成績已不可能達成。",
+  "Las tiradas del gacha, los Pokémon nuevos y los premios se guardan en la nube al momento. Si abriste el juego en otro aparato o navegador y te faltaba algo, vuelve a abrirlo donde lo conseguiste: se recupera solo.": "扭蛋結果、新獲得的寶可夢和獎勵，現在都會立即儲存至雲端。若在其他裝置或瀏覽器開啟遊戲時發現內容缺少，請回到原本獲得它們的裝置或瀏覽器重新開啟遊戲，就會自動恢復。",
   "13 October 2026": "2026 年 10 月 13 日",
   "13 de octubre de 2026": "2026 年 10 月 13 日",
   "Tiempo extra y grietas con menos azar": "延長戰局與裂縫出現機制調整",
@@ -3383,7 +3620,7 @@
   "El juego se actualiza solo cuando sale una versión nueva: si estás en el menú, a los 5 segundos; si estás jugando, al acabar la partida (sin perder nada).": "推出新版本時，遊戲會自動更新：停留在選單時會在 5 秒內更新；正在遊玩時則等本局結束後更新，不會遺失進度與獎勵。",
   "Botón de Novedades (esta ventana) con todos los cambios del juego.": "新增「更新公告」按鈕（就是這個視窗），可查看遊戲的各項更新。",
   "Números más fáciles de leer: el 2, el 5 y el 8 ya no se confunden.": "改善數字字型，讓 2、5、8 更容易分辨。",
-  "Elige la versión normal o shiny de tu compañero desde el menú principal, debajo de él.": "可直接在主選單的夥伴下方，切換一般或異色外觀。",
+  "Elige la versión normal o shiny de tu compañero desde el menú principal, debajo de él.": "可直接在主選單的夥伴下方，切換一般或閃光外觀。",
   "Mejoras nuevas para cada Pokémon: Golpe Crítico (+3 % de críticos por nivel, que hacen x1,5 de daño), Cambio de cartas (+1 cambio de las cartas de nivel por run) y Veto (bloquea movimientos para que no te salgan en las cartas; se eligen en Mejoras).": "各寶可夢新增強化項目：「擊中要害」（每級提高 3% 擊中要害機率，造成 1.5 倍傷害）、「卡片重抽」（每局升級卡片重抽次數 +1）及「招式封鎖」（在強化頁選擇招式，使其不再出現在升級卡片中）。",
   "Atajos de movimientos (en Mejoras, para cada Pokémon): elige qué movimiento va siempre en cada hueco, por ejemplo Confusión siempre en el 1, para la memoria muscular.": "招式欄位設定：可在各寶可夢的強化頁設定招式固定使用的欄位，例如將「念力」固定在第 1 格，方便熟悉操作。",
   "Avalancha hace menos daño (21 en vez de 26): derrotaba casi el doble que la media de los movimientos.": "「岩崩」傷害從 26 下調為 21；原本的擊敗數量接近一般招式的兩倍。",
@@ -3391,7 +3628,7 @@
   "Los legendarios de grieta ya no dan siempre tickets x10: dan uno la mitad de las veces (antes daban 2 siempre y salían demasiados).": "裂縫中的傳說寶可夢不再必定掉落十連抽獎券，改為 50% 機率掉落 1 張；先前必定掉落 2 張，數量過多。",
   "Cooperativo: si vuestras redes no consiguen conectar entre sí, la sala lo avisa y lo reintenta sola, en vez de jugar a tirones por un servidor lento.": "多人合作：若彼此的網路無法直接連線，房間會顯示提示並持續重試，不再改用速度較慢的伺服器而造成遊戲卡頓。",
   "Hemos cambiado de servidores para que el juego siga siendo gratis: puede que tengas que volver a iniciar sesión (con la misma cuenta y contraseña, o con Google). Tu partida y tus Pokémon siguen igual.": "為了讓遊戲持續免費營運，已搬遷至新的伺服器。你可能需要以原帳號密碼或 Google 重新登入；存檔與寶可夢不受影響。",
-  "Gacha: los shiny ya no salen repetidos. Si te toca uno que ya tienes, sale otro de la misma rareza que te falte.": "扭蛋：異色寶可夢不再重複。若抽到已擁有的異色寶可夢，會改成同稀有度、尚未擁有的異色寶可夢。",
+  "Gacha: los shiny ya no salen repetidos. Si te toca uno que ya tienes, sale otro de la misma rareza que te falte.": "扭蛋：閃光寶可夢不再重複。若抽到已擁有的閃光寶可夢，會改成同稀有度、尚未擁有的閃光寶可夢。",
   "Grietas con menos azar: cada vez que no sale una, la siguiente es más probable (como mucho 2,5 minutos sin grieta).": "調整裂縫出現機制：每次未出現裂縫，下次出現的機率就會提高，最長不會超過 2.5 分鐘沒有裂縫。",
   "Los legendarios que aún no has vencido salen 4 veces más en las grietas.": "尚未擊敗的傳說寶可夢，在裂縫中的出現機率提高為 4 倍。",
   "Los curanderos curan más cuanto más fuerte pegas, pero cada vez menos y con un tope (como mucho el 2,5x).": "你的攻擊越強，治療型敵人的回復量也越高，但增幅會逐漸減少，最高為原本的 2.5 倍。",
@@ -3414,7 +3651,7 @@
   "Vínculos: al vencer a un legendario fusionas movimientos que se lanzan a la vez desde un solo hueco (hasta 4).": "羈絆：擊敗傳說寶可夢後，可以融合招式，讓同一欄位同時施放最多 4 個招式。",
   "Botón para cambiar las cartas de subir de nivel.": "新增升級卡片重抽按鈕。",
   "Más grietas.": "增加裂縫出現頻率。",
-  "Movimientos psíquicos y curanderos más flojos.": "下調超能力屬性招式與治療型敵人的強度。",
+  "Movimientos psíquicos y curanderos más flojos.": "下調超能力系招式與治療型敵人的強度。",
   "Las mejoras de las cartas de nivel (velocidad, recarga, experiencia, imán, coraza y potencia) tienen un tope de veces.": "升級卡片中的速度、冷卻、經驗、磁力、防禦與威力強化，新增選取次數上限。",
   "En el móvil, la ficha del Pokémon sale al lado; entrar es más rápido y el gacha x10 se puede cerrar.": "手機版寶可夢詳細資料改為顯示在旁邊；登入速度更快，十連扭蛋畫面也可以關閉。",
   "Pantalla negra en partidas de más de una hora por llenarse la memoria de imágenes.": "修正遊玩超過一小時後，因圖片記憶體耗盡而黑畫面的問題。",
@@ -3426,7 +3663,7 @@
   "Más reto": "更具挑戰性",
   "Jefes y legendarios con 4 ataques avisados que se enfurecen a media vida.": "頭目與傳說寶可夢擁有 4 種附帶預警的攻擊，體力降至一半時會進入狂暴狀態。",
   "12 movimientos nuevos y 8 formas de atacar nuevas: bumerán, cadena, minas, meteoros, torreta, embestida, rastro y abanico.": "新增 12 個招式與 8 種攻擊形式：迴旋、連鎖、地雷、隕石、砲塔、衝刺、軌跡及扇形攻擊。",
-  "Eventos a mitad de partida (hordas de un tipo, hora dorada, Pokémon perdidos) y Meowth y Gholdengo que huyen cargados de monedas.": "新增戰局事件（單一屬性群襲、黃金時段、迷路的寶可夢），以及攜帶大量金幣逃跑的喵喵與賽富豪。",
+  "Eventos a mitad de partida (hordas de un tipo, hora dorada, Pokémon perdidos) y Meowth y Gholdengo que huyen cargados de monedas.": "新增戰局事件（單一系群襲、黃金時段、迷路的寶可夢），以及攜帶大量金幣逃跑的喵喵與賽富豪。",
   "Estatuas para los Pokémon grandes.": "為大型寶可夢新增雕像。",
   "Más difícil: menos enemigos pero más duros.": "提高難度：敵人數量減少，但實力更強。",
   "Subir de nivel es más lento, los tickets son más raros y los jefes dan ticket x10 una de cada tres veces.": "升級速度降低，抽獎券更稀有；頭目有三分之一機率掉落 1 張十連抽獎券。",
@@ -3446,9 +3683,9 @@
   "Misiones, grietas y cooperativo": "任務、裂縫與多人合作",
   "Misiones diarias y semanales, logros con medallas y títulos, y perfil público.": "新增每日與每週任務、附帶獎章與稱號的成就，以及公開個人檔案。",
   "Objetos equipables, evoluciones de movimientos y enemigos que curan, protegen, invocan o explotan.": "新增攜帶道具、招式進化，以及會治療、提供護盾、召喚或爆炸的敵人。",
-  "Grietas que llevan a 18 arenas legendarias, una por tipo, y clima que cambia la batalla.": "新增通往 18 座傳說競技場的裂縫（各屬性一座），以及會影響戰鬥的天氣。",
+  "Grietas que llevan a 18 arenas legendarias, una por tipo, y clima que cambia la batalla.": "新增通往 18 座傳說競技場的裂縫（各系一座），以及會影響戰鬥的天氣。",
   "Cooperativo con tu lista de amigos y ranking.": "新增好友名單、多人合作與排行榜。",
-  "Mejoras para cada Pokémon, gacha tragaperras con tickets y tabla de tipos.": "新增各寶可夢的強化系統、使用抽獎券的拉霸式扭蛋，以及屬性相剋表。",
+  "Mejoras para cada Pokémon, gacha tragaperras con tickets y tabla de tipos.": "新增各寶可夢的強化系統、使用抽獎券的拉霸式扭蛋，以及系相剋表。",
   "Cámara más lejos y enemigos que rodean los obstáculos.": "拉遠鏡頭，敵人也會繞過障礙物。",
   "8 October 2026": "2026 年 10 月 8 日",
   "8 de octubre de 2026": "2026 年 10 月 8 日",
@@ -3459,11 +3696,15 @@
 };
   const exact = new Map(), lower = new Map(), fragments = new Map(), patterns = [];
   const cache = new Map(), translatedNodes = new WeakMap();
+  const literalCaptures = new Set([
+    '¿Reportar la marca de {x} como trampa?', "Report {x}'s record as cheating?",
+    '¿Banear a {x}? No podrán volver a salir en el ranking y se borra su marca.'
+  ]);
   const escapeRE = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   for (const [source, target] of Object.entries(DICT)) {
     if (!target || source === target) continue;
     if (source.includes('{x}')) {
-      patterns.push({ re: new RegExp('^' + source.split('{x}').map(escapeRE).join('(.+?)') + '$', 'iu'), target });
+      patterns.push({ re: new RegExp('^' + source.split('{x}').map(escapeRE).join('(.+?)') + '$', 'iu'), target, literal: literalCaptures.has(source) });
     } else {
       exact.set(source, target);
       lower.set(source.toLowerCase(), target);
@@ -3482,7 +3723,7 @@
         const match = p.re.exec(body);
         if (!match) continue;
         let i = 1;
-        result = p.target.replace(/\{x\}/g, () => translate(match[i++], depth + 1));
+        result = p.target.replace(/\{x\}/g, () => p.literal ? match[i++] : translate(match[i++], depth + 1));
         break;
       }
     }
@@ -3500,6 +3741,19 @@
   function isMoveElement(el) {
     return !el.closest('.type-chip, .type, .tag-chip') && !!el.closest('.card .nm, #scr-bond .ds, #bond-sub, .move-icons, #starter-info, #dex-detail p, #over-stats b, .bind-slots option, .ban-moves button');
   }
+  const typeNames = new Set(['一般','火','水','電','草','冰','格鬥','毒','地面','飛行','超能力','蟲','岩石','幽靈','龍','惡','鋼','妖精']);
+  function displayText(s, el) {
+    let result;
+    if (guideHost) {
+      // Translate complete UI labels only; leave guide paragraphs intact.
+      const [, lead, middle, tail] = /^(\s*)([\s\S]*?)(\s*)$/.exec(s);
+      const body = middle.replace(/\s+/g, ' ');
+      const target = exact.get(body) ?? lower.get(body.toLowerCase());
+      result = target === undefined ? s : lead + target + tail;
+    } else result = translate(isMoveElement(el) ? moveText(s) : s);
+    const typeLabel = el.closest('.type-chip, .type, .tag-chip') || (guideHost && el.closest('a[href^="/types/"]'));
+    return typeLabel && typeNames.has(result.trim()) ? result.replace(result.trim(), result.trim() + '系') : result;
+  }
   const ATTRS = ['placeholder', 'title', 'alt', 'aria-label'];
   const skipped = el => {
     if (el?.closest('[contenteditable], script, style, code, textarea, [data-pszh-control]')) return true;
@@ -3512,7 +3766,7 @@
     if (!node.parentElement || skipped(node.parentElement)) return;
     const before = node.nodeValue;
     if (translatedNodes.get(node) === before) return;
-    const after = translate(isMoveElement(node.parentElement) ? moveText(before) : before);
+    const after = displayText(before, node.parentElement);
     translatedNodes.set(node, after);
     if (after !== before) node.nodeValue = after;
   }
@@ -3521,7 +3775,7 @@
     for (const attr of ATTRS) {
       const before = el.getAttribute(attr);
       if (!before) continue;
-      const after = translate(isMoveElement(el) ? moveText(before) : before);
+      const after = displayText(before, el);
       if (before !== after) el.setAttribute(attr, after);
     }
   }
@@ -3550,6 +3804,25 @@
     const original = window[method];
     window[method] = function(text) { return original.call(window, translate(text)); };
   }
+  function installJudgmentTitles() {
+    const judgment = window.G?.Judgment;
+    if (!judgment?.drawOverlay || judgment.drawOverlay.__pszhTitles) return;
+    const draw = judgment.drawOverlay;
+    // This animation translates a whole title, then paints individual letters.
+    // Translate before it splits, and reorder the two lines for Chinese grammar.
+    // Scope the override to rendering; restore the original translator even on error.
+    const titles = { 'LA SENTENCIA': '阿爾宙斯的', 'DE ARCEUS': '審判' };
+    const localizedDraw = function (...args) {
+      const i18n = window.G?.I18n;
+      if (!i18n?.t) return draw.apply(this, args);
+      const original = i18n.t;
+      i18n.t = function (s, ...rest) { return titles[s] ?? original.call(this, s, ...rest); };
+      try { return draw.apply(this, args); }
+      finally { i18n.t = original; }
+    };
+    localizedDraw.__pszhTitles = true;
+    judgment.drawOverlay = localizedDraw;
+  }
   const style = document.createElement('style');
   style.id = 'pszh-style';
   style.textContent = `html[data-pszh] { --font: "Microsoft JhengHei", "PingFang TC", "Noto Sans TC", system-ui, sans-serif; }
@@ -3563,6 +3836,8 @@
   let queued = false;
   function showStatus() {
     queued = false;
+    checkGameFrames();
+    installJudgmentTitles();
     const box = document.querySelector('#set-body');
     if (box && !box.querySelector('#pszh-status')) {
       const p = document.createElement('p');
@@ -3591,4 +3866,7 @@
     if (changedTree) scheduleStatus();
   }).observe(document.body, { childList:true, subtree:true, characterData:true, attributes:true, attributeFilter:ATTRS });
   showStatus();
+  if (gameHost && window.parent !== window) {
+    try { const origin = new URL(document.referrer).origin; if (guideOrigins.includes(origin)) announceReady(origin); } catch {}
+  }
 })();

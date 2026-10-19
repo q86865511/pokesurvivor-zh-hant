@@ -29,6 +29,8 @@
 2. 按「載入未封裝項目」，選擇 `pokesurvivor-zh-ext` 資料夾。
 3. 若竄改猴裡也裝了同一份腳本，請先停用，避免重複翻譯。
 
+擴充功能同時作用於遊戲站 `pokesurvivor.com` 與導覽站 `pokesurvivor.org`（含其內嵌的遊戲畫面）。
+
 擴充功能不會自動更新補丁；補丁出新版時，用 Greasy Fork 上的新腳本覆蓋 `pokesurvivor-zh-ext/patch.js`，再到擴充功能頁按重新載入。
 
 ## 原理
