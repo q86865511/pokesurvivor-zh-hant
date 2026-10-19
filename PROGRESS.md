@@ -1,7 +1,7 @@
 # PROGRESS
 
 ## 目前狀態
-啟動器 v1.1.0／擴充功能 2.0.0 改用遊戲內建繁中（本地已 commit，尚未 push／發 Release）。
+啟動器 v1.1.0／擴充功能 2.0.0 改用遊戲內建繁中，已 push 並發布 v1.1.0 Release。
 
 ## 已完成
 - 2026-10-20：遊戲 10/19 起內建官方繁中（上游 `--faltan` 對英文字典缺 0 條、i18n 測試 18/18 過，線上實測不靠補丁即中文）→ 停用疊加的 Greasy Fork 補丁並移除 `patch.js`；啟動器改載 `https://pokesurvivor.com/`，以 preload 在頁面腳本前於 `ps.lang` 未設定時寫入 `zh-Hant`；擴充功能改為 `document_start` 的 `set-lang.js` 做同樣的事。打包後 exe `PS_SELFTEST=1` 實測 `lang`／`ps.lang` 皆為 zh-Hant。
@@ -13,7 +13,6 @@
 ## 進行中
 
 ## 待辦
-- push 並發布 v1.1.0 Release（附新打包的 zip）。
 
 ## 已知問題
 - 啟動器內「使用 Google 登入」可能被 Google 阻擋內嵌瀏覽器（未實測）。
