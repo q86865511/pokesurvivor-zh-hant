@@ -1,7 +1,7 @@
 {
   "name": "pokesurvivor-zh-launcher",
-  "version": "1.0.1",
-  "description": "PokéSurvivor 繁體中文啟動器：載入原站並注入 Greasy Fork 腳本 599869",
+  "version": "1.1.0",
+  "description": "PokéSurvivor 繁體中文啟動器：載入原站並預設使用遊戲內建的繁體中文",
   "main": "main.js",
   "private": true,
   "license": "MIT",

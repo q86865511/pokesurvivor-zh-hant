@@ -1,20 +1,9 @@
 const { app, BrowserWindow, Menu, shell, net, dialog } = require('electron');
-const fs = require('fs');
 const path = require('path');
 
-const GAME_URL = 'https://pokesurvivor.com/en/';
+const GAME_URL = 'https://pokesurvivor.com/';
 const GAME_HOSTS = new Set(['pokesurvivor.com', 'www.pokesurvivor.com']);
-const PATCH_URL = 'https://update.greasyfork.org/scripts/599869/Pok%C3%A9Survivor%20%E7%B9%81%E9%AB%94%E4%B8%AD%E6%96%87%E8%A3%9C%E4%B8%81.user.js';
-const BUNDLED_PATCH = path.join(__dirname, 'patch.js');
 const RELEASE_API = 'https://api.github.com/repos/q86865511/pokesurvivor-zh-hant/releases/latest';
-
-let patchSource = '';
-let patchOrigin = '';
-
-function versionOf(src) {
-  const m = /@version\s+(\S+)/.exec(src || '');
-  return m ? m[1] : '0';
-}
 
 function newerThan(a, b) {
   const pa = a.split('.').map(Number);
@@ -24,40 +13,6 @@ function newerThan(a, b) {
     if (d) return d > 0;
   }
   return false;
-}
-
-function readIfExists(p) {
-  try { return fs.readFileSync(p, 'utf8'); } catch { return ''; }
-}
-
-// 優先用最新版：線上 > 快取 > 內附；線上抓不到（離線、逾時）就沿用本機最新的那份。
-async function loadPatch() {
-  const cachePath = path.join(app.getPath('userData'), 'patch.js');
-  let best = readIfExists(BUNDLED_PATCH);
-  patchOrigin = '內附';
-  const cached = readIfExists(cachePath);
-  if (cached && newerThan(versionOf(cached), versionOf(best))) {
-    best = cached;
-    patchOrigin = '快取';
-  }
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 5000);
-    const res = await net.fetch(PATCH_URL, { signal: controller.signal });
-    clearTimeout(timer);
-    if (res.ok) {
-      const online = await res.text();
-      if (online.includes('==UserScript==') && !newerThan(versionOf(best), versionOf(online))) {
-        best = online;
-        patchOrigin = '線上';
-        fs.writeFileSync(cachePath, online, 'utf8');
-      }
-    }
-  } catch (err) {
-    console.warn('補丁線上更新失敗，使用本機版本：', err.message);
-  }
-  patchSource = best;
-  console.log(`補丁版本 ${versionOf(best)}（來源：${patchOrigin}）`);
 }
 
 async function fetchLatestRelease() {
@@ -77,7 +32,7 @@ async function fetchLatestRelease() {
   }
 }
 
-// 只通知、不自動安裝：沒有程式碼簽章的自動安裝會反覆觸發 SmartScreen，且翻譯本身已由 loadPatch 自動更新。
+// 只通知、不自動安裝：沒有程式碼簽章的自動安裝會反覆觸發 SmartScreen，且翻譯本身隨遊戲原站更新。
 async function checkForUpdates(win, { manual }) {
   let info;
   try {
@@ -98,11 +53,7 @@ async function checkForUpdates(win, { manual }) {
     });
     if (response === 0) shell.openExternal(info.url);
   } else if (manual) {
-    dialog.showMessageBox(win, {
-      type: 'info',
-      message: `已是最新版本（${info.current}）`,
-      detail: `翻譯補丁版本 ${versionOf(patchSource)}（來源：${patchOrigin}）`,
-    });
+    dialog.showMessageBox(win, { type: 'info', message: `已是最新版本（${info.current}）` });
   }
   return info;
 }
@@ -117,25 +68,27 @@ function createWindow() {
     height: 800,
     title: 'PokéSurvivor 中文版',
     autoHideMenuBar: true,
-    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      preload: path.join(__dirname, 'preload.js'),
+    },
   });
 
-  win.webContents.on('did-finish-load', () => {
-    const url = win.webContents.getURL();
-    if (isGameUrl(url) && patchSource) {
-      win.webContents.executeJavaScript(patchSource).catch((err) => console.error('注入失敗：', err));
-      if (process.env.PS_SELFTEST) {
-        setTimeout(async () => {
-          const probe = await win.webContents.executeJavaScript(
-            'JSON.stringify({ url: location.href, lang: document.documentElement.lang, text: document.body.innerText.slice(0, 200) })'
-          );
-          console.log('SELFTEST', probe);
-          console.log('SELFTEST update', JSON.stringify(await checkForUpdates(win, { manual: false })));
-          app.quit();
-        }, 3000);
-      }
-    }
-  });
+  if (process.env.PS_SELFTEST) {
+    win.webContents.on('did-finish-load', () => {
+      if (!isGameUrl(win.webContents.getURL())) return;
+      setTimeout(async () => {
+        const probe = await win.webContents.executeJavaScript(
+          "JSON.stringify({ url: location.href, lang: document.documentElement.lang, psLang: localStorage.getItem('ps.lang'), text: document.body.innerText.slice(0, 200) })"
+        );
+        console.log('SELFTEST', probe);
+        console.log('SELFTEST update', JSON.stringify(await checkForUpdates(win, { manual: false })));
+        app.quit();
+      }, 3000);
+    });
+  }
 
   // 遊戲站內連結留在視窗內；登入彈窗（Google 等）開子視窗；其餘外部連結交給系統瀏覽器。
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -170,9 +123,8 @@ function buildMenu() {
   ]));
 }
 
-app.whenReady().then(async () => {
+app.whenReady().then(() => {
   buildMenu();
-  await loadPatch();
   const win = createWindow();
   if (!process.env.PS_SELFTEST) {
     win.webContents.once('did-finish-load', () => checkForUpdates(win, { manual: false }));

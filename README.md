@@ -1,23 +1,24 @@
 # PokéSurvivor 繁體中文版（啟動器＋瀏覽器擴充）
 
-讓網頁遊戲 [PokéSurvivor](https://pokesurvivor.com/en/) 顯示繁體中文的兩種方式，**不需要安裝竄改猴（Tampermonkey）**。
+讓網頁遊戲 [PokéSurvivor](https://pokesurvivor.com/) 一打開就是繁體中文。
 
-翻譯內容完全來自 Kai5106 製作的 Greasy Fork 腳本
-[PokéSurvivor 繁體中文補丁](https://greasyfork.org/zh-TW/scripts/599869)；本專案只負責「把那份腳本注入遊戲頁面」，不改動翻譯本身。
+遊戲自 2026-10-19 起**內建官方繁體中文**（設定 → 圖形 → 語言 → 繁體中文，翻譯由 Zhe Xi Huang 貢獻，見上游
+[docs/LOCALIZATION.md](https://github.com/JPTER78/pokesurvivor/blob/main/docs/LOCALIZATION.md)）。
+本專案從 v1.1.0（擴充功能 2.0.0）起不再疊加第三方翻譯補丁，只負責「第一次開啟時把遊戲語言預設為繁體中文」。
 
 > 非官方作品。與 PokéSurvivor 開發者、The Pokémon Company、Nintendo、Game Freak 皆無關聯。
-> 遊戲帳號、雲端存檔與遊戲更新都直接使用原站，本專案只在你的畫面上做文字顯示替換。
+> 遊戲帳號、雲端存檔、遊戲更新與翻譯都直接來自原站。
 
-## 方式一：中文版啟動器（推薦）
+> 其實不裝任何東西也行：在遊戲裡到「設定 → 圖形 → 語言」選「繁體中文」，之後就會一直是中文。
+
+## 方式一：中文版啟動器
 
 獨立的 Windows 程式，雙擊就開啟中文版遊戲。
 
 1. 到 [Releases](https://github.com/q86865511/pokesurvivor-zh-hant/releases/latest) 下載 `PokeSurvivor-zh-win32-x64.zip`。
 2. 解壓縮（整個資料夾都要，不能只拿 exe），執行 `PokeSurvivor-zh.exe`。
 
-更新機制：
-
-- **翻譯補丁自動更新**：每次啟動會從 Greasy Fork 抓最新版補丁並快取；離線時使用上次快取或內附版本。
+- **翻譯**：隨遊戲原站更新，啟動器不需要跟著更新。
 - **啟動器本體**：啟動時自動檢查本 repo 的 GitHub Releases，有新版會跳出提示，按「前往下載」開啟下載頁。
   也可以從選單「說明 → 檢查更新」手動檢查。
 
@@ -27,20 +28,17 @@
 
 1. 下載本 repo，打開 `chrome://extensions`（Edge 為 `edge://extensions`），開啟「開發人員模式」。
 2. 按「載入未封裝項目」，選擇 `pokesurvivor-zh-ext` 資料夾。
-3. 若竄改猴裡也裝了同一份腳本，請先停用，避免重複翻譯。
+3. 若竄改猴裡裝了 Greasy Fork 的繁中補丁，建議停用，避免和遊戲內建翻譯重複處理文字與字型。
 
-擴充功能同時作用於遊戲站 `pokesurvivor.com` 與導覽站 `pokesurvivor.org`（含其內嵌的遊戲畫面）。
-
-擴充功能不會自動更新補丁；補丁出新版時，用 Greasy Fork 上的新腳本覆蓋 `pokesurvivor-zh-ext/patch.js`，再到擴充功能頁按重新載入。
+擴充功能作用於遊戲站 `pokesurvivor.com`，包含導覽站 `pokesurvivor.org` 內嵌的遊戲畫面；導覽站本身的攻略文章維持原文（遊戲官方翻譯不涵蓋攻略頁）。
 
 ## 原理
 
-補丁是純顯示層替換：用字典把西班牙文／英文原文換成中文，處理 DOM 文字（TreeWalker＋MutationObserver），
-並覆寫 canvas 的 `fillText`／`strokeText`／`measureText` 翻譯遊戲畫面內文字、把不含中文的像素字型換成中文字型。
-因為它不需要任何竄改猴專屬 API，所以只要能在頁面主環境執行腳本即可：
+遊戲的 `js/core/locales.js` 依序採用：玩家存的語言（`localStorage` 的 `ps.lang`）→ 網址 `/en/` → 瀏覽器語言。
+本專案在遊戲腳本執行前檢查 `ps.lang`，**沒選過語言才**寫入 `zh-Hant`；玩家之後在遊戲設定改成其他語言，一律尊重。
 
-- 擴充功能：Manifest V3 content script，`"world": "MAIN"`。
-- 啟動器：Electron 載入原站，頁面載入完成時以 `executeJavaScript` 注入。
+- 擴充功能：Manifest V3 content script，`run_at: document_start`。
+- 啟動器：Electron 的 preload 腳本（頁面腳本之前執行），載入 `https://pokesurvivor.com/`。
 
 ## 自行建置啟動器
 
@@ -53,15 +51,15 @@ npm start          # 開發模式執行
 npm run pack       # 打包到 dist/PokeSurvivor-zh-win32-x64
 ```
 
-設定環境變數 `PS_SELFTEST=1` 執行時，會在注入後印出頁面語言、首頁文字與更新檢查結果，然後自動結束（供驗證用）。
+設定環境變數 `PS_SELFTEST=1` 執行時，會在頁面載入後印出頁面語言、`ps.lang`、首頁文字與更新檢查結果，然後自動結束（供驗證用）。
 
 ## 致謝與參考資料
 
-- 遊戲：[PokéSurvivor](https://pokesurvivor.com/)（原始碼與原文字串：[JPTER78/pokesurvivor](https://github.com/JPTER78/pokesurvivor)）
-- 翻譯補丁：[PokéSurvivor 繁體中文補丁](https://greasyfork.org/zh-TW/scripts/599869)，作者 [Kai5106](https://greasyfork.org/zh-TW/users/1652257-kai5106)，MIT 授權
-- 寶可夢中文名稱資料：[PokeAPI](https://pokeapi.co/)（由補丁作者引用）
+- 遊戲：[PokéSurvivor](https://pokesurvivor.com/)（原始碼：[JPTER78/pokesurvivor](https://github.com/JPTER78/pokesurvivor)）
+- 遊戲內建繁體中文：Zhe Xi Huang（[JPTER78/pokesurvivor#74](https://github.com/JPTER78/pokesurvivor/pull/74)）
+- v1.0.x 曾使用的翻譯補丁：[PokéSurvivor 繁體中文補丁](https://greasyfork.org/zh-TW/scripts/599869)，作者 [Kai5106](https://greasyfork.org/zh-TW/users/1652257-kai5106)，MIT 授權
 - 啟動器框架：[Electron](https://www.electronjs.org/)、[@electron/packager](https://github.com/electron/packager)
 
 ## 授權
 
-本 repo 的程式碼以 MIT 授權釋出，見 [LICENSE](LICENSE)。內附的 `patch.js` 為上述補丁的原檔，保留其原本的 MIT 授權聲明。
+本 repo 的程式碼以 MIT 授權釋出，見 [LICENSE](LICENSE)。
